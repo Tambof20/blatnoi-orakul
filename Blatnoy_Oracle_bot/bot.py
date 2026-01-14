@@ -12,8 +12,7 @@ import threading
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 if not TOKEN:
     print("Ошибка: TELEGRAM_TOKEN не установлен!")
-    # Временно для теста
-    TOKEN = "8357389930:AAHYHm9jF8BvmEb5mlXyP62rtltNy9J2CYY"
+    
 
 # Создаем бота
 bot = telebot.TeleBot(TOKEN)
@@ -1180,3 +1179,4 @@ if __name__ == "__main__":
     
     # Запускаем бота в основном потоке
     run_bot()
+
