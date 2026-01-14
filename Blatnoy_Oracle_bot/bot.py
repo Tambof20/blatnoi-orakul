@@ -10,13 +10,13 @@ import threading
 TOKEN = os.getenv("TELEGRAM_TOKEN", "8357389930:AAGBf0WddWcw6-1gYa1w3MZJ-4VRDmmJZyM")
 bot = telebot.TeleBot(TOKEN)
 
-# Создаем Flask приложение для Railway
+# Создаем Flask приложение
 app = Flask(__name__)
 
 
 @app.route("/")
 def home():
-    return "🚀 Блатной оракул работает на Railway!"
+    return "🚀 Блатной оракул работает на Render.com!"
 
 
 @app.route("/health")
@@ -24,10 +24,643 @@ def health():
     return "OK", 200
 
 
-# Ваш код остается ниже
-# ======================= ВАШ КОД НАЧИНАЕТСЯ ЗДЕСЬ =======================
+@app.route("/ping")
+def ping():
+    return "PONG", 200
 
-# Шаблоны для ответов (с {name} для подстановки имени)
+
+@app.route("/status")
+def status():
+    return {
+        "status": "online",
+        "service": "blatnoi-orakul",
+        "timestamp": time.time(),
+        "message": "🚀 Блатной оракул работает на Render!",
+    }
+
+
+# ======================= ИГРА В ОЧКО =======================
+
+# ======================= ОСНОВНЫЕ СЛОВАРИ =======================
+user_names = {}
+user_scores = {}
+dealer_scores = {}
+user_bets = {}
+active_games = {}
+
+# ======================= КАРТОЧНАЯ КОЛОДА И ФУНКЦИИ ИГРЫ =======================
+card_deck = [
+    "2♠",
+    "2♥",
+    "2♦",
+    "2♣",
+    "3♠",
+    "3♥",
+    "3♦",
+    "3♣",
+    "4♠",
+    "4♥",
+    "4♦",
+    "4♣",
+    "5♠",
+    "5♥",
+    "5♦",
+    "5♣",
+    "6♠",
+    "6♥",
+    "6♦",
+    "6♣",
+    "7♠",
+    "7♥",
+    "7♦",
+    "7♣",
+    "8♠",
+    "8♥",
+    "8♦",
+    "8♣",
+    "9♠",
+    "9♥",
+    "9♦",
+    "9♣",
+    "10♠",
+    "10♥",
+    "10♦",
+    "10♣",
+    "В♠",
+    "В♥",
+    "В♦",
+    "В♣",  # Валет
+    "Д♠",
+    "Д♥",
+    "Д♦",
+    "Д♣",  # Дама
+    "К♠",
+    "К♥",
+    "К♦",
+    "К♣",  # Король
+    "Т♠",
+    "Т♥",
+    "Т♦",
+    "Т♣",  # Туз
+]
+
+
+def get_card_value(card):
+    if card[0] in ["2", "3", "4", "5", "6", "7", "8", "9"]:
+        return int(card[0])
+    elif card.startswith("10"):
+        return 10
+    elif card[0] in ["В", "Д", "К"]:
+        return 10
+    elif card[0] == "Т":
+        return 11
+    return 0
+
+
+def calculate_hand_value(hand):
+    total = 0
+    aces = 0
+    for card in hand:
+        if card[0] == "Т":
+            aces += 1
+            total += 11
+        else:
+            total += get_card_value(card)
+    while total > 21 and aces > 0:
+        total -= 10
+        aces -= 1
+    return total
+
+
+def deal_card():
+    return random.choice(card_deck)
+
+
+def create_game(user_id):
+    player_hand = [deal_card(), deal_card()]
+    dealer_hand = [deal_card(), deal_card()]
+    active_games[user_id] = {
+        "player_hand": player_hand,
+        "dealer_hand": dealer_hand,
+        "game_state": "player_turn",
+    }
+    return active_games[user_id]
+
+
+def get_hand_display(hand, hide_first=False):
+    if hide_first:
+        return f"❓ {hand[1]}"
+    return " ".join(hand)
+
+
+def clean_bet_text(bet_text):
+    if bet_text.lower().startswith("на "):
+        bet_text = bet_text[3:].strip()
+    if bet_text.lower().endswith(" на"):
+        bet_text = bet_text[:-3].strip()
+    bet_text = " ".join(bet_text.split())
+    if not bet_text:
+        return "ничего"
+    return bet_text
+
+
+def check_tournament_winner(user_id):
+    player_score = user_scores.get(user_id, 0)
+    dealer_score = dealer_scores.get(user_id, 0)
+    if player_score >= 101:
+        return "player"
+    elif dealer_score >= 101:
+        return "dealer"
+    return None
+
+
+# ======================= ФУНКЦИИ ИГРЫ =======================
+def dealer_play_with_humor(message, user_id):
+    game = active_games[user_id]
+    dealer_value = calculate_hand_value(game["dealer_hand"])
+    while dealer_value < 17:
+        game["dealer_hand"].append(deal_card())
+        dealer_value = calculate_hand_value(game["dealer_hand"])
+    player_value = calculate_hand_value(game["player_hand"])
+    if dealer_value > 21:
+        end_round_with_humor(message, user_id, "dealer_bust")
+    elif dealer_value > player_value:
+        end_round_with_humor(message, user_id, "dealer_wins")
+    elif dealer_value < player_value:
+        end_round_with_humor(message, user_id, "player_wins")
+    else:
+        end_round_with_humor(message, user_id, "push")
+
+
+def end_round_with_humor(message, user_id, result):
+    if user_id not in active_games:
+        return
+    game = active_games[user_id]
+    bet = user_bets.get(user_id, "ни на что")
+    player_value = calculate_hand_value(game["player_hand"])
+    dealer_value = calculate_hand_value(game["dealer_hand"])
+    if user_id not in user_scores:
+        user_scores[user_id] = 0
+    if user_id not in dealer_scores:
+        dealer_scores[user_id] = 0
+    old_player_score = user_scores[user_id]
+    old_dealer_score = dealer_scores[user_id]
+    player_round_score = 0
+    dealer_round_score = 0
+    score_message = ""
+
+    if result == "player_wins":
+        player_round_score = player_value
+        score_message = f" У тебя плюс {player_round_score} "
+    elif result == "dealer_wins":
+        dealer_round_score = dealer_value
+        score_message = f" Я плюсую себе {dealer_round_score} "
+    elif result == "player_bust":
+        dealer_round_score = dealer_value
+        score_message = f" Перебор у тебя! Мне плюс {dealer_round_score} очков"
+    elif result == "dealer_bust":
+        player_round_score = player_value
+        score_message = f"Что то я пожадничал! Твои {player_round_score} очков"
+    elif result == "surrender":
+        dealer_round_score = dealer_value // 2
+        score_message = (
+            f" Сдался,мне половину гони. Получается это {dealer_round_score} "
+        )
+    elif result == "push":
+        score_message = f" Ничья! Ни тебе ,ни мне"
+
+    user_scores[user_id] = old_player_score + player_round_score
+    dealer_scores[user_id] = old_dealer_score + dealer_round_score
+    new_player_score = user_scores[user_id]
+    new_dealer_score = dealer_scores[user_id]
+
+    result_comments = {
+        "player_wins": [
+            f"Ты забрал сегодня кон. Завтра я заберу твою пайку.",
+            f"Знай — в этой игре нет победителей. Только те, кто еще не проиграл.",
+            f"Ты взял сегодня столько, сколько я тебе разрешил взять.",
+        ],
+        "dealer_wins": [
+            f"Фраерок, спасибо за пополнение!.",
+            f"Раз - и в дамки, ебана..",
+            f"Выиграл у тебя сегодня, выиграю и завтра епт",
+        ],
+        "player_bust": [
+            f"Перебор, сынок. На зоне за перебор бьют. В картах - просто проигрываешь.!",
+            f"Отыгрался хер на скрипке, перебор у тебя",
+            f"Перебор. Не по масти шелестишь, фраерок!",
+        ],
+        "dealer_bust": [
+            f"У меня лишка.Ей богу в руки бы тебе насрать за такую раздачу.",
+            f"Бля, опять у меня перебор.",
+            f"Перебор... Знаешь, фраер, на зоне только два вида перебора прощают: перебор по молодости и перебор по глупости. Молодость моя прошла, осталась глупость.",
+        ],
+        "push": [
+            f"Карты сошлись вровень. Как наши судьбы.",
+            f"Карты сказали: ничья. Но жизнь говорит: ты мне должен.",
+            f"Сегодня карты решили, что мы равны. Завтра я решу, что это ошибка.",
+        ],
+        "surrender": [
+            f"Сдался без боя. Как мент на допросе. Полставки мои.",
+            f"Сдался. Как в 41-ом французы.",
+            f"О, сдался! Как сука на поводке!",
+        ],
+    }
+
+    comment = random.choice(result_comments.get(result, ["Раунд окончен!"]))
+    final_text = (
+        f"{comment}\n\n"
+        f"Фиксируем на бумажке:\n"
+        f"Твои карты: {get_hand_display(game['player_hand'])} = {player_value}\n"
+        f"Мои карты: {get_hand_display(game['dealer_hand'])} = {dealer_value}\n\n"
+        f"{score_message}\n\n"
+        f"Общая картина такая:\n"
+        f"На кону у нас <b>{bet}</b>\n"
+        f"Твой счет:  {new_player_score}\n"
+        f"Мой счет:  {new_dealer_score}\n"
+    )
+
+    tournament_winner = check_tournament_winner(user_id)
+    if tournament_winner:
+        if tournament_winner == "player":
+            final_text += f"\n Ты набрал {new_player_score} очков и сохранил <b>{bet}</b>, мои конгрателейшенс! "
+        else:
+            final_text += f"\n У меня {new_dealer_score} очков! Проебал ты <b>{bet}</b> как здрасте! "
+        final_text += f"\n\nХочешь реванш? (/сыграем?)"
+        try:
+            bot.edit_message_text(
+                final_text,
+                message.chat.id,
+                message.message_id,
+                reply_markup=None,
+                parse_mode="HTML",
+            )
+        except:
+            bot.send_message(message.chat.id, final_text, parse_mode="HTML")
+        if user_id in active_games:
+            del active_games[user_id]
+        if user_id in user_scores:
+            del user_scores[user_id]
+        if user_id in dealer_scores:
+            del dealer_scores[user_id]
+        if user_id in user_bets:
+            del user_bets[user_id]
+        return
+
+    markup = types.InlineKeyboardMarkup()
+    btn_continue = types.InlineKeyboardButton("Продолжаем?", callback_data="continue")
+    markup.add(btn_continue)
+    final_text += f"\nНу че, продолжим?"
+
+    try:
+        bot.edit_message_text(
+            final_text,
+            message.chat.id,
+            message.message_id,
+            reply_markup=markup,
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        bot.send_message(
+            message.chat.id, final_text, reply_markup=markup, parse_mode="HTML"
+        )
+
+    if user_id in active_games:
+        del active_games[user_id]
+
+
+def update_game_display(message, user_id):
+    if user_id not in active_games:
+        return
+    game = active_games[user_id]
+    player_value = calculate_hand_value(game["player_hand"])
+    player_score = user_scores.get(user_id, 0)
+    dealer_score = dealer_scores.get(user_id, 0)
+    bet = user_bets.get(user_id, "ни на что")
+    game_text = (
+        f"Играем на <b>{bet}</b>\n"
+        f"У тебя всего {player_score}, у меня {dealer_score} \n"
+        f"Играем дальше\n\n"
+        f"Твои карты: {get_hand_display(game['player_hand'])}\n"
+        f"Очков: {player_value}\n\n"
+        f"Мои карты: {get_hand_display(game['dealer_hand'], hide_first=True)}\n"
+        f"Первая карта скрыта\n\n"
+        f"Что выбираешь?:"
+    )
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_hit = types.InlineKeyboardButton("Давай карту", callback_data="hit")
+    btn_stand = types.InlineKeyboardButton("Хватит", callback_data="stand")
+    btn_surrender = types.InlineKeyboardButton("Сдаюсь", callback_data="surrender")
+    markup.add(btn_hit, btn_stand, btn_surrender)
+    try:
+        bot.edit_message_text(
+            game_text,
+            message.chat.id,
+            message.message_id,
+            reply_markup=markup,
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        bot.send_message(
+            message.chat.id, game_text, reply_markup=markup, parse_mode="HTML"
+        )
+
+
+# ======================= ОБРАБОТЧИКИ КОМАНД ИГРЫ =======================
+@bot.message_handler(commands=["сыграем?"])
+def new_tournament(message):
+    user_id = message.from_user.id
+    if user_id not in user_names:
+        user_names[user_id] = message.from_user.first_name or "фраерок"
+    name = user_names[user_id]
+    user_scores[user_id] = 0
+    dealer_scores[user_id] = 0
+    if user_id in user_bets:
+        del user_bets[user_id]
+    if user_id in active_games:
+        del active_games[user_id]
+    bot.send_message(
+        message.chat.id,
+        f"Играть будем до 101 очка, {name}!\n"
+        f"Очки считаем за выигранный кон, перебор это 0 очков.\n"
+        f"Ну, решился что ли?",
+        parse_mode="HTML",
+    )
+    msg = bot.send_message(
+        message.chat.id, f"На что играем, {name}?", parse_mode="HTML"
+    )
+    bot.register_next_step_handler(msg, process_bet_with_humor)
+
+
+def process_bet_with_humor(message):
+    user_id = message.from_user.id
+    if user_id not in user_names:
+        user_names[user_id] = message.from_user.first_name or "фраерок"
+    original_bet = message.text.strip()
+    bet_text = original_bet.lower().strip()
+    cleaned_bet = clean_bet_text(bet_text)
+    display_bet = cleaned_bet
+
+    if any(
+        phrase in bet_text
+        for phrase in ["просто так", "простотак", "да просто", "за просто так"]
+    ):
+        bot.send_message(
+            message.chat.id,
+            "Ты побереги свой 'просто так'.\nДумай еще.",
+            parse_mode="HTML",
+        )
+        msg = bot.send_message(message.chat.id, "Так на что играем?")
+        bot.register_next_step_handler(msg, process_bet_with_humor)
+        return
+    elif "интерес" in bet_text:
+        bot.send_message(
+            message.chat.id,
+            "Мой интерес - твоя квартира. Но я человек добрый, даю шанс подумать еще.\nПредложи что-то попроще, пока я не передумал.",
+            parse_mode="HTML",
+        )
+        msg = bot.send_message(message.chat.id, "Ну? Что предлагаешь?")
+        bot.register_next_step_handler(msg, process_bet_with_humor)
+        return
+    elif any(
+        phrase in bet_text
+        for phrase in [
+            "/поинтересоваться",
+            "/погремуха",
+            "/расход",
+            "/не_оставь_в_беде",
+            "/ссучиться",
+            "/сыграем",
+        ]
+    ):
+        bot.send_message(
+            message.chat.id, "Ставка твоя голимый тухляк.\nМеняй.", parse_mode="HTML"
+        )
+        msg = bot.send_message(message.chat.id, "Что ставишь?")
+        bot.register_next_step_handler(msg, process_bet_with_humor)
+        return
+    elif any(
+        phrase in bet_text
+        for phrase in [
+            "ни на что",
+            "ни начто",
+            "ни что",
+            "ничего",
+            "ни на что не играю",
+        ]
+    ):
+        bot.send_message(
+            message.chat.id,
+            "Для меня 'ничто' - это твоя жизнь. Хочешь так?\nПодумай еще, пока я в хорошем настроении.",
+            parse_mode="HTML",
+        )
+        msg = bot.send_message(message.chat.id, "Уважаемый, не тяни.")
+        bot.register_next_step_handler(msg, process_bet_with_humor)
+        return
+    elif any(
+        phrase in bet_text for phrase in ["мое очко", "мою жопу", "мой рот", "моя жопа"]
+    ):
+        bot.send_message(
+            message.chat.id,
+            "Я с петухами в карты не играю.\nПодумай еще.",
+            parse_mode="HTML",
+        )
+        msg = bot.send_message(message.chat.id, "А ты че задумался то?")
+        bot.register_next_step_handler(msg, process_bet_with_humor)
+        return
+    elif any(
+        phrase in bet_text
+        for phrase in ["твое очко", "твою жопу", "твой рот", "твоя жопа"]
+    ):
+        bot.send_message(
+            message.chat.id,
+            f"О как!\nПринимаю! Ставка  {display_bet}.\n За базар придется отвечать...",
+            parse_mode="HTML",
+        )
+        user_bets[user_id] = display_bet
+        start_new_round(message)
+        return
+    else:
+        bot.send_message(
+            message.chat.id,
+            f"Ну давай, играем на {display_bet}!\nПонеслась.., моча по трубам!",
+            parse_mode="HTML",
+        )
+        user_bets[user_id] = display_bet
+        start_new_round(message)
+
+
+@bot.message_handler(commands=["продолжим?"])
+def continue_tournament(message):
+    user_id = message.from_user.id
+    name = user_names.get(user_id, "фраерок")
+    if user_id not in user_bets:
+        bot.send_message(
+            message.chat.id,
+            f"Игры пока нет, {name}!\nДавай начнем ее командой /сыграем?",
+            parse_mode="HTML",
+        )
+        return
+    tournament_winner = check_tournament_winner(user_id)
+    if tournament_winner:
+        if tournament_winner == "player":
+            bot.send_message(
+                message.chat.id,
+                f"Ты уже выиграл, {name}! Начинаем по новой? (/сыграем?)",
+                parse_mode="HTML",
+            )
+        else:
+            bot.send_message(
+                message.chat.id,
+                f"Я тебя уже обставил {name}! Хочешь реванш? (/сыграем?)",
+                parse_mode="HTML",
+            )
+        return
+    bet = user_bets[user_id]
+    player_score = user_scores.get(user_id, 0)
+    dealer_score = dealer_scores.get(user_id, 0)
+    bot.send_message(
+        message.chat.id,
+        f"Продолжаем игру, {name}!\n"
+        f"Играем на  <b>{bet}</b>\n"
+        f"Твой счет: {player_score} | Мой счет: {dealer_score}\n"
+        f"Начинаем новый раунд!",
+        parse_mode="HTML",
+    )
+    start_new_round(message)
+
+
+def start_new_round(message):
+    user_id = message.chat.id if hasattr(message, "chat") else message.from_user.id
+    name = user_names.get(user_id, "фраерок")
+    tournament_winner = check_tournament_winner(user_id)
+    if tournament_winner:
+        if tournament_winner == "player":
+            bot.send_message(
+                message.chat.id,
+                f"Ты выиграл, {name}! Хочешь еще испытать судьбу? (/сыграем?)",
+                parse_mode="HTML",
+            )
+        else:
+            bot.send_message(
+                message.chat.id,
+                f"Уважаемый, я тебя уже выиграл, {name}! Хочешь реванш? (/сыграем?)",
+                parse_mode="HTML",
+            )
+        return
+    create_game(user_id)
+    game = active_games[user_id]
+    player_value = calculate_hand_value(game["player_hand"])
+    player_score = user_scores.get(user_id, 0)
+    dealer_score = dealer_scores.get(user_id, 0)
+    bet = user_bets.get(user_id, "ни на что")
+    game_text = (
+        f"Играем на <b>{bet}</b>\n"
+        f"У тебя всего {player_score} у меня {dealer_score}\n"
+        f"Смотри на карты\n\n"
+        f"Твои карты: {get_hand_display(game['player_hand'])}\n"
+        f"Очков: {player_value}\n\n"
+        f"Мои карты: {get_hand_display(game['dealer_hand'], hide_first=True)}\n"
+        f"Первая карта скрыта\n\n"
+        f"Что выбираешь?:"
+    )
+    markup = types.InlineKeyboardMarkup(row_width=2)
+    btn_hit = types.InlineKeyboardButton("Давай карту", callback_data="hit")
+    btn_stand = types.InlineKeyboardButton("Хватит", callback_data="stand")
+    btn_surrender = types.InlineKeyboardButton("Сдаюсь", callback_data="surrender")
+    markup.add(btn_hit, btn_stand, btn_surrender)
+    if hasattr(message, "message_id"):
+        try:
+            bot.edit_message_text(
+                game_text,
+                message.chat.id,
+                message.message_id,
+                reply_markup=markup,
+                parse_mode="HTML",
+            )
+        except Exception as e:
+            bot.send_message(
+                message.chat.id, game_text, reply_markup=markup, parse_mode="HTML"
+            )
+    else:
+        bot.send_message(
+            message.chat.id, game_text, reply_markup=markup, parse_mode="HTML"
+        )
+
+
+@bot.callback_query_handler(
+    func=lambda call: call.data
+    in ["hit", "stand", "surrender", "continue", "quit_game"]
+)
+def game_callback(call):
+    user_id = call.from_user.id
+    if call.data == "quit_game":
+        items_deleted = reset_game_data(user_id)
+        name = user_names.get(user_id, "фраерок")
+        if items_deleted:
+            deleted_text = ", ".join(items_deleted)
+            bot.answer_callback_query(call.id, f" Сбросил {deleted_text}")
+            try:
+                bot.edit_message_text(
+                    f" {name}, решил соскочить с игры!\n"
+                    f" Сброшено: {deleted_text}.\n\n"
+                    f"Хочешь начать заново? — /сыграем?",
+                    call.message.chat.id,
+                    call.message.message_id,
+                    reply_markup=None,
+                    parse_mode="HTML",
+                )
+            except:
+                bot.send_message(
+                    call.message.chat.id,
+                    f" {name}, соскочил с игры.\n"
+                    f"Сброшено: {deleted_text}.\n\n"
+                    f"Хочешь начать заново? — /сыграем?",
+                    parse_mode="HTML",
+                )
+        else:
+            bot.answer_callback_query(call.id, " Нет активной игры")
+        return
+    if call.data == "continue":
+        if user_id not in user_bets:
+            bot.answer_callback_query(call.id, "Сначала сделай ставку!")
+            return
+        if user_id in active_games:
+            del active_games[user_id]
+
+        class SimpleMessage:
+            def __init__(self, uid):
+                class Chat:
+                    def __init__(self, cid):
+                        self.id = cid
+
+                self.chat = Chat(uid)
+
+        start_new_round(SimpleMessage(user_id))
+        bot.answer_callback_query(call.id)
+        return
+    if user_id not in active_games:
+        bot.answer_callback_query(call.id, "Игра не найдена")
+        return
+    game = active_games[user_id]
+    if call.data == "hit":
+        game["player_hand"].append(deal_card())
+        player_value = calculate_hand_value(game["player_hand"])
+        if player_value > 21:
+            game["game_state"] = "game_over"
+            end_round_with_humor(call.message, user_id, "player_bust")
+        else:
+            update_game_display(call.message, user_id)
+    elif call.data == "stand":
+        game["game_state"] = "dealer_turn"
+        dealer_play_with_humor(call.message, user_id)
+    elif call.data == "surrender":
+        game["game_state"] = "game_over"
+        end_round_with_humor(call.message, user_id, "surrender")
+    bot.answer_callback_query(call.id)
+
+
+# ======================= ОРИГИНАЛЬНЫЙ КОД ОРАКУЛА =======================
 templates = {
     "default_username": [
         "На, {name}, держи мудрость...",
@@ -52,7 +685,6 @@ templates = {
     ],
 }
 
-# Списки ответов по ключевым словам
 когда = [
     "Когда в гривнах шакал панибрата найдёт",
     "когда свист на горе раком встанет",
@@ -93,7 +725,7 @@ templates = {
 
 кто = [
     "Тот, чьё имя на зоне шепчут, а вслух не зовут",
-    "Братва, которая с нами за одним столом сидела, пока ты щи хлебал",
+    "Братва, которая с нами за одном столом сидела, пока ты щи хлебал",
     "Кто вопросы задаёт — тот с ответом не всегда спит спокойно. Завязывай.",
     "Кто последний раз спрашивал — до сих пор ищет. Не повторяй.",
     "Кто знает — тот молчит. Кто спрашивает — тот лишний. Будь здоров",
@@ -101,9 +733,9 @@ templates = {
 ]
 
 куда = [
-    "Куда все уходят, но никто не возвращается. Лучше не спрашивай.",
+    "Куда все уходят, но никто не возвращается. Лучще не спрашивай.",
     "Куда ветер зоны дует — не нам менять его направление",
-    "Куда последний вагон идёт — билет в один конец. Не твой маршрут",
+    "Куда последний вагон идёт — билет в один конц. Не твой маршрут",
     "Куда глаза смотрят, а ноги не доходят. Оставь как есть",
     "Куда тень падает — там и ответ, но светить туда не стоит",
     "Куда дорога кривая ведёт — прямым ходом не дойти. Выпей чаю и сиди",
@@ -151,7 +783,7 @@ sp = [
     "Свети ворам, а не ментам: полжизни здесь, полжизни там!",
     "Ворам - по масти, мусорам - по пасти!",
     "Шоколад ни в чём не виноват. Пацан к успеху шёл. Не получилось, не фортануло",
-    "Свобода — это когда тебя не ищут.",
+    "Свобода — это когда тебя не ищет.",
     "Попал — не сдавай, сдался — не жалуйся!",
     "Сильному - мясо, слабому - кость!",
     "Сучья кровь не водица — не прощается",
@@ -169,7 +801,6 @@ sp = [
     "Нет на зоне краше, петуха на параше!",
 ]
 
-# Словарь для быстрого доступа к спискам по ключевым словам
 keyword_lists = {
     "когда": когда,
     "почему": почему,
@@ -183,63 +814,31 @@ keyword_lists = {
 
 
 def get_response_by_keywords(question):
-    """
-    Определяет, из какого списка выбрать ответ на основе ключевых слов в вопросе.
-    Правила:
-    1. Если есть слово 'ты' - всегда берем из списка 'ты' (приоритетное)
-    2. Если есть слова из разных списков - берем из 'sp'
-    3. Если есть слово из одного списка - берем из этого списка
-    4. Если нет ключевых слов - берем из 'sp'
-    """
     question_lower = question.lower()
-
-    # Правило 1: Проверяем наличие приоритетного слова 'ты'
-    # Ищем отдельно стоящее слово 'ты' или как часть слова
-    # Для более точного поиска можно разбить на слова
-    words = question_lower.split()
-
-    # Проверяем наличие слова 'ты' в любом месте текста
     if "ты" in question_lower:
-        # Проверяем, что это именно слово "ты", а не часть другого слова
-        # Ищем слово "ты" отдельно или с пунктуацией
         if (
             " ты " in f" {question_lower} "
             or question_lower.startswith("ты ")
             or question_lower.endswith(" ты")
         ):
             return random.choice(ты)
-
-    # Собираем найденные ключевые слова
     found_keywords = []
-
-    # Проверяем наличие каждого ключевого слова
     for keyword in keyword_lists:
-        if keyword != "ты":  # 'ты' уже обработали выше
-            # Проверяем, есть ли ключевое слово как отдельное слово
+        if keyword != " ты ":
             if (
                 f" {keyword} " in f" {question_lower} "
                 or question_lower.startswith(f"{keyword} ")
                 or question_lower.endswith(f" {keyword}")
             ):
                 found_keywords.append(keyword)
-
-    # Правило 2: Если найдены слова из разных списков
     if len(found_keywords) > 1:
         return random.choice(sp)
-
-    # Правило 3: Если найдено слово из одного списка
     elif len(found_keywords) == 1:
         return random.choice(keyword_lists[found_keywords[0]])
-
-    # Правило 4: Если нет ключевых слов
     else:
         return random.choice(sp)
 
 
-# Словарь для хранения имен пользователей
-user_names = {}
-
-# Словарь для хранения никнеймов по умолчанию
 default_nicks = {
     "male": [
         "Братан",
@@ -255,26 +854,74 @@ default_nicks = {
 }
 
 
-# Функция для полного сброса пользователя
 def reset_user(user_id):
-    """Полностью очищает данные пользователя"""
     if user_id in user_names:
         del user_names[user_id]
     return True
 
 
-# Обработчик команды /start
+@bot.message_handler(commands=["ссучиться"])
+def report_to_dev(message):
+    user_id = message.from_user.id
+    name = user_names.get(user_id, "фраерок")
+    bot.send_message(
+        message.chat.id,
+        f" Ну что {name}, хочешь доложить администрации об чем то?\n"
+        f"Кидай маляву, и я передам ее кому надо:\n",
+        parse_mode="HTML",
+    )
+    msg = bot.send_message(message.chat.id, "Пой птичка не стесняйся...")
+    bot.register_next_step_handler(msg, process_dev_message)
+
+
+def process_dev_message(message):
+    user_id = message.from_user.id
+    name = user_names.get(user_id, "фраерок")
+    user_message = message.text
+    try:
+        bot.send_message(
+            585578360,
+            f"Сообщение от блатного оракула\n\n"
+            f"👤 От: {name} (ID: {user_id})\n"
+            f"⏰ {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"✉️ {user_message}\n\n",
+        )
+    except Exception as e:
+        print(f"❌ Ошибка отправки: {e}")
+    bot.send_message(
+        message.chat.id,
+        f" {name}, твои действия зафиксированы\n"
+        f"«{user_message[:100]}...»\n\n"
+        f"Маляву твою передали.\n"
+        f"Администрация примет соответствующие меры.",
+        parse_mode="HTML",
+    )
+
+
+def reset_game_data(user_id):
+    items_deleted = []
+    if user_id in active_games:
+        del active_games[user_id]
+        items_deleted.append("активную игру")
+    if user_id in user_bets:
+        del user_bets[user_id]
+        items_deleted.append("ставку")
+    if user_id in user_scores:
+        del user_scores[user_id]
+        items_deleted.append("счет игрока")
+    if user_id in dealer_scores:
+        del dealer_scores[user_id]
+        items_deleted.append("счет дилера")
+    return items_deleted
+
+
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
     user_id = message.from_user.id
-
-    # Сразу создаем запись для пользователя
     if user_id not in user_names:
-        # Генерируем случайный ник по умолчанию
         if message.from_user.username:
             user_names[user_id] = f"@{message.from_user.username}"
         else:
-            # Выбираем случайный ник из списка
             gender_guess = (
                 "female"
                 if message.from_user.first_name
@@ -282,42 +929,41 @@ def send_welcome(message):
                 else "male"
             )
             user_names[user_id] = random.choice(default_nicks[gender_guess])
-
     welcome_text = (
         f"Вечер в хату, {user_names[user_id]}!\n\n"
         "Не знаешь, как поступить?\n"
         "Я подскажу выход, все как положено, согласно понятиям.\n\n"
         "Можешь сразу спрашивать, но порядочный арестант сначала представляется (погремуха).\n"
-        "С уважаемым человеком и разговор другой\n\n"
-        "Команды:\n"
-        "• поинтересоваться - задать вопрос\n"
-        "• погремуха - представиться по имени\n"
-        "• не_оставь_в_беде - справка\n"
-        "• расход - закончить базар. (стереть имя)"
+        "С уважаемым человеком и разговор другой\n"
+        "А можем просто в картишки перекинуться (сыграем?) \n\n"
+        "        Команды:\n"
+        "• /поинтересоваться - задать вопрос\n"
+        "• /сыграем? - игра в 21 (надо набрать суммарно больше 101)\n"
+        "• /погремуха - представиться по имени\n"
+        "• /расход - закончить базар (остановить игру в карты, стереть имя)\n"
+        "• /не_оставь_в_беде - справка\n"
+        "• /ссучиться - связаться с администрацией (жалобы и предложения)\n"
     )
-
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     btn1 = types.KeyboardButton("/поинтересоваться")
-    btn2 = types.KeyboardButton("/погремуха")
-    btn3 = types.KeyboardButton("/не_оставь_в_беде")
+    btn2 = types.KeyboardButton("/сыграем?")
+    btn3 = types.KeyboardButton("/погремуха")
     btn4 = types.KeyboardButton("/расход")
-    markup.add(btn1, btn2, btn3, btn4)
-
+    btn5 = types.KeyboardButton("/не_оставь_в_беде")
+    btn6 = types.KeyboardButton("/ссучиться")
+    markup.add(btn1, btn2, btn3, btn4, btn5, btn6)
     bot.send_message(message.chat.id, welcome_text, reply_markup=markup)
 
 
-# Обработчик команды /name
 @bot.message_handler(commands=["погремуха"])
 def ask_name(message):
     user_id = message.from_user.id
     current_name = user_names.get(user_id, "братишка")
-
     msg_text = (
         f"Пока ты не представишься я буду звать тебя {current_name}.\n"
         "Хочешь уважения, представься\n"
         "(или напиши 'нет', чтобы оставить все как есть):"
     )
-
     msg = bot.send_message(message.chat.id, msg_text)
     bot.register_next_step_handler(msg, process_name)
 
@@ -325,20 +971,26 @@ def ask_name(message):
 def process_name(message):
     user_id = message.from_user.id
     name = message.text.strip()
-
     if name.lower() in ["нет", "no", "оставить", "так и быть", "пусть будет так"]:
         bot.send_message(
             message.chat.id,
             f"Добро, оставим как есть {user_names.get(user_id, 'на старых')} .",
         )
         return
-
-    if name and len(name) < 15 and name != "/расход" and name != "/погремуха":
+    if (
+        name
+        and len(name) < 15
+        and name != "/расход"
+        and name != "/погремуха"
+        and name != "/сыграем?"
+        and name != "/ссучиться"
+    ):
         user_names[user_id] = name
         bot.send_message(message.chat.id, f"Приветствую тебя {name}. С чем пожаловал?")
     else:
         bot.send_message(
-            message.chat.id, "У порядочного арестанта должна быть погремуха."
+            message.chat.id,
+            "У порядочного арестанта должна быть погремуха!\nКак вспомнишь обращайся.",
         )
         if user_id not in user_names:
             gender_guess = (
@@ -350,11 +1002,9 @@ def process_name(message):
             user_names[user_id] = random.choice(default_nicks[gender_guess])
 
 
-# Обработчик команды /ask
 @bot.message_handler(commands=["поинтересоваться"])
 def ask_question(message):
     user_id = message.from_user.id
-
     if user_id not in user_names:
         if message.from_user.username:
             user_names[user_id] = f"@{message.from_user.username}"
@@ -366,36 +1016,38 @@ def ask_question(message):
                 else "male"
             )
             user_names[user_id] = random.choice(default_nicks[gender_guess])
-
     name = user_names[user_id]
     msg = bot.send_message(message.chat.id, f"Выкладывай {name}, че там?")
     bot.register_next_step_handler(msg, process_question)
 
 
-# Функция для получения случайного шаблона
 def get_random_template(template_type):
-    """Возвращает случайный шаблон указанного типа"""
     if template_type in templates:
         return random.choice(templates[template_type])
-    return "Вот что скажу:"  # заглушка на случай ошибки
+    return "Вот что скажу:"
 
 
-# Главная функция обработки вопросов
 def process_question(message):
     user_id = message.from_user.id
     question = message.text.strip()
-    words = question.split()  # разбиваем по пробелам
+    words = question.split()
     if (
-        question in ["/поинтересоваться", "/погремуха", "/не_оставь_в_беде", "/расход"]
-        or len(words) <= 1  # если 0 или 1 слово
+        question
+        in [
+            "/поинтересоваться",
+            "/погремуха",
+            "/не_оставь_в_беде",
+            "/расход",
+            "/ссучиться",
+            "/сыграем?",
+        ]
+        or len(words) <= 1
     ):
         bot.send_message(
             message.chat.id,
-            "Вопрос как предъява, не может быть пустым!\n" "Пиши че хотел.",
+            "Вопрос как предъява, не может быть пустым!\nПиши че хотел.",
         )
         return
-
-    # Создаем имя по умолчанию, если его еще нет
     if user_id not in user_names:
         if message.from_user.username:
             user_names[user_id] = f"@{message.from_user.username}"
@@ -407,73 +1059,45 @@ def process_question(message):
                 else "male"
             )
             user_names[user_id] = random.choice(default_nicks[gender_guess])
-
     name = user_names[user_id]
-
-    # "Задумчивая" пауза
     bot.send_chat_action(message.chat.id, "typing")
-
-    # ВЫБОР ОТВЕТА ПО КЛЮЧЕВЫМ СЛОВАМ
     response = get_response_by_keywords(question)
-
-    # Обновленный блок отправки ответа
-    # Отправляем ответ
     if user_id in user_names:
         name = user_names[user_id]
-
         if (
             message.from_user.username
             and user_names[user_id] == f"@{message.from_user.username}"
         ):
-            # Дефолтное имя (username)
             template = get_random_template("default_username")
             bot.send_message(message.chat.id, template.format(name=name))
             bot.send_chat_action(message.chat.id, "typing")
             time.sleep(1)
-            bot.send_message(
-                message.chat.id,
-                f"«<b>{response}</b>»",
-                parse_mode="HTML",
-            )
+            bot.send_message(message.chat.id, f"«<b>{response}</b>»", parse_mode="HTML")
         elif (
             message.from_user.username
             and user_names[user_id] != f"@{message.from_user.username}"
         ):
-            # Пользователь сам представился (поменял имя)
             template = get_random_template("custom_name")
             bot.send_message(message.chat.id, template.format(name=name))
             bot.send_chat_action(message.chat.id, "typing")
             time.sleep(1)
-            bot.send_message(
-                message.chat.id,
-                f"«<b>{response}</b>»",
-                parse_mode="HTML",
-            )
+            bot.send_message(message.chat.id, f"«<b>{response}</b>»", parse_mode="HTML")
         else:
-            # Пользователь не авторизовался вообще
             template = get_random_template("no_name")
             bot.send_message(message.chat.id, template)
             bot.send_chat_action(message.chat.id, "typing")
             time.sleep(1)
-            bot.send_message(
-                message.chat.id,
-                f"«<b>{response}</b>»",
-                parse_mode="HTML",
-            )
-    # Спрашиваем, нужен ли еще совет
+            bot.send_message(message.chat.id, f"«<b>{response}</b>»", parse_mode="HTML")
     markup = types.InlineKeyboardMarkup()
     btn_yes = types.InlineKeyboardButton("Да", callback_data="ask_again")
     btn_no = types.InlineKeyboardButton("Нет", callback_data="stop_talking")
     markup.add(btn_yes, btn_no)
-
     bot.send_message(message.chat.id, "Еще вопросы?", reply_markup=markup)
 
 
-# Обработчик нажатий на inline-кнопки
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     user_id = call.from_user.id
-
     if user_id not in user_names:
         user_info = bot.get_chat(user_id)
         if user_info.username:
@@ -486,78 +1110,73 @@ def callback_query(call):
                 else "male"
             )
             user_names[user_id] = random.choice(default_nicks[gender_guess])
-
     name = user_names[user_id]
-
     if call.data == "ask_again":
         msg = bot.send_message(call.message.chat.id, "Ну задавай")
         bot.register_next_step_handler(msg, process_question)
-
     elif call.data == "stop_talking":
         bot.send_message(
-            call.message.chat.id,
-            f"Бывай {name}! Заходи не бойся, выходи не плачь.",
+            call.message.chat.id, f"Бывай {name}! Заходи не бойся, выходи не плачь."
         )
         bot.edit_message_reply_markup(
             call.message.chat.id, call.message.message_id, reply_markup=None
         )
 
 
-# Обработчик команды /help
 @bot.message_handler(commands=["не_оставь_в_беде"])
 def send_help(message):
     user_id = message.from_user.id
     name = user_names.get(user_id, "родной")
-
     help_text = (
-        f"{name}, я — блатной оракул, помогу разобраться в жизненной ситуации.\n\n"
+        f"{name}, я — блатной оракул, помогу разобраться в жизненной ситуации, или обыграю тебя в очко\n\n"
         "<b>Как пользоваться:</b>\n"
         "1. Просто напиши любой вопрос в чат\n"
         "2. Получи мудрый совет согласно понятиям\n"
-        "3. Желательно представиться через кнопку (погремуха) тогда и диалог будет у нас другим\n"
-        "4. Спрашивай сколько угодно и что угодно\n\n"
+        "4. Если решил донести на кого то знаю через кого передать маляву.\n"
+        "5. Желательно представиться через кнопку (погремуха) тогда и диалог будет у нас другим\n"
+        "6. Спрашивай сколько угодно и что угодно\n\n"
         "<b>Команды:</b>\n"
         "/start - начать общение заново\n"
         "/поинтересоваться  - начать общение, задать вопрос\n"
         "/погремуха - представиться по имени, но это по желанию)\n"
         "/не_оставь_в_беде - это справка(помощь)\n"
-        "/расход - закончить разговор (стереть имя)\n\n"
+        "/расход - закончить разговор (стереть имя)\n"
+        "/ссучиться - кинуть маляву куму (жалобы и предложения)\n"
+        "/сыграем? - игра в 21 (пока сумме не будет больше 101)\n\n"
         "Консультирую 24/7 по всем вопросам!"
     )
     bot.send_message(message.chat.id, help_text, parse_mode="HTML")
 
 
-# Обработчик команды /stop
 @bot.message_handler(commands=["расход"])
 def stop_talking(message):
     user_id = message.from_user.id
-
     if user_id in user_names:
         name = user_names[user_id]
-        bot.send_message(message.chat.id, "Мир тебе, бродяга.")
+        game_items = reset_game_data(user_id)
+        del user_names[user_id]
+        if game_items:
+            response_text = f" {name}, решил соскочить!\nигра закончена"
+        else:
+            response_text = f" Бывай {name}, заходи не бойся, уходи не плачь\n"
+        bot.send_message(message.chat.id, response_text, parse_mode="HTML")
     else:
-        bot.send_message(message.chat.id, "Жизнь ворам, фарту масти")
+        game_items = reset_game_data(user_id)
+        if game_items:
+            deleted_game_text = ", ".join(game_items)
+            response_text = (
+                f" Бродяга, заявил расход!\n Сброшено: {deleted_game_text}.\n\n"
+            )
+        else:
+            response_text = f" Жизнь ворам, фарту масти!"
+        bot.send_message(message.chat.id, response_text, parse_mode="HTML")
 
-    was_reset = reset_user(user_id)
 
-    if was_reset:
-        farewell_text = (
-            "✅ <b>Всё стёрто!</b>\n\n" "Хочешь начать с чистого листа — пиши /start"
-        )
-    else:
-        farewell_text = "Ты и так чист как стеклышко.\n" "Начнём с начала — /start"
-
-
-# Обработчик ВСЕХ текстовых сообщений
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
     user_id = message.from_user.id
-
-    # Игнорируем команды
     if message.text.startswith("/"):
         return
-
-    # Создаем имя по умолчанию, если его еще нет
     if user_id not in user_names:
         if message.from_user.username:
             user_names[user_id] = f"@{message.from_user.username}"
@@ -569,46 +1188,10 @@ def handle_all_messages(message):
                 else "male"
             )
             user_names[user_id] = random.choice(default_nicks[gender_guess])
-
-    # Обрабатываем как вопрос
     process_question(message)
 
 
-# ======================= ВАШ КОД ЗАКАНЧИВАЕТСЯ ЗДЕСЬ =======================
-
-
-def run_flask():
-    """Запуск Flask сервера для Railway"""
-    port = int(os.getenv("PORT", 8080))
-    print(f"🚀 Flask запущен на порту {port}")
-    app.run(host="0.0.0.0", port=port)
-
-
-def run_bot_with_retry():
-    """Запуск бота с автоматическим перезапуском при ошибках"""
-    print("🤖 Запуск блатного оракула...")
-
-    while True:
-        try:
-            print("🔄 Запускаем polling...")
-            bot.polling(none_stop=True, interval=0, timeout=60)
-        except Exception as e:
-            print(f"⚠️ Ошибка: {e}")
-            print("🔄 Перезапуск через 10 секунд...")
-            time.sleep(10)
-
-
+# ======================= ЗАПУСК НА RENDER =======================
 if __name__ == "__main__":
-    print("=" * 50)
-    print("🚂 Блатной оракул запускается на Railway")
-    print("=" * 50)
-
-    # Запускаем Flask в отдельном потоке
-    flask_thread = threading.Thread(target=run_flask, daemon=True)
-    flask_thread.start()
-
-    # Ждем немного, чтобы Flask успел запуститься
-    time.sleep(2)
-
-    # Запускаем бота
-    run_bot_with_retry()
+    print("🚀 Блатной оракул запущен на Render.com")
+    bot.infinity_polling(timeout=60, long_polling_timeout=60)
