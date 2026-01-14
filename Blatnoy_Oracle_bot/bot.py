@@ -7,8 +7,10 @@ from flask import Flask, request
 import threading
 
 # Получаем токен из переменных окружения
-TOKEN = os.getenv("TELEGRAM_TOKEN", "8357389930:AAGBf0WddWcw6-1gYa1w3MZJ-4VRDmmJZyM")
-bot = telebot.TeleBot(TOKEN)
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+if not TOKEN:
+    print("Ошибка: TELEGRAM_TOKEN не установлен!")
+    exit(1)
 
 # Создаем Flask приложение
 app = Flask(__name__)
@@ -1195,3 +1197,4 @@ def handle_all_messages(message):
 if __name__ == "__main__":
     print("🚀 Блатной оракул запущен на Render.com")
     bot.infinity_polling(timeout=60, long_polling_timeout=60)
+
