@@ -5,6 +5,9 @@ import telebot
 from telebot import types
 from flask import Flask, request
 import threading
+from datetime import datetime, timedelta
+import schedule
+from collections import defaultdict
 
 # ======================= ИНИЦИАЛИЗАЦИЯ БОТА И FLASK =======================
 
@@ -14,12 +17,22 @@ if not TOKEN:
     print("Ошибка: TELEGRAM_TOKEN не установлен!")
     
 
+# ID администратора для отправки уведомлений (замени на свой)
+ADMIN_ID = 585578360  # Здесь твой ID из кода
+
 # Создаем бота
 bot = telebot.TeleBot(TOKEN)
 
 # Создаем Flask приложение
 app = Flask(__name__)
 
+# ======================= НОВЫЕ СТРУКТУРЫ ДАННЫХ =======================
+
+# Хранилище для учета посещений пользователей
+user_visits = defaultdict(list)  # user_id: [timestamp1, timestamp2, ...]
+
+# Хранилище для истории игр
+game_history = []  # Список словарей с информацией о завершенных играх
 
 @app.route("/")
 def home():
@@ -43,8 +56,9 @@ def status():
         "service": "blatnoi-orakul",
         "timestamp": time.time(),
         "message": "🚀 Блатной оракул работает на Render!",
+        "active_users": len(user_visits),
+        "games_played": len(game_history)
     }
-
 
 # ======================= ИГРА В ОЧКО =======================
 
@@ -160,6 +174,116 @@ def dealer_play_with_humor(message, user_id):
         end_round_with_humor(message, user_id, "push")
 
 
+# ======================= НОВАЯ ФУНКЦИЯ: СОХРАНЕНИЕ ИГРЫ =======================
+def save_game_result(user_id, result, bet, player_value, dealer_value, player_score, dealer_score):
+    """Сохраняет результат игры в историю"""
+    now = datetime.now()
+    
+    game_data = {
+        "timestamp": now,
+        "datetime_str": now.strftime("%Y-%m-%d %H:%M:%S"),
+        "user_id": user_id,
+        "username": user_names.get(user_id, "фраерок"),
+        "bet": bet,
+        "result": result,
+        "player_value": player_value,
+        "dealer_value": dealer_value,
+        "player_total_score": player_score,
+        "dealer_total_score": dealer_score
+    }
+    
+    game_history.append(game_data)
+    
+    # Отправляем уведомление администратору
+    send_game_notification_to_admin(game_data)
+    
+    return game_data
+
+
+def send_game_notification_to_admin(game_data):
+    """Отправляет уведомление об игре администратору"""
+    try:
+        # Форматируем результат для читаемости
+        result_map = {
+            "player_wins": "Выиграл игрок",
+            "dealer_wins": "Выиграл дилер",
+            "player_bust": "Перебор у игрока",
+            "dealer_bust": "Перебор у дилера",
+            "surrender": "Игрок сдался",
+            "push": "Ничья"
+        }
+        
+        result_text = result_map.get(game_data["result"], game_data["result"])
+        
+        notification = (
+            f"🎮 *Завершена игра в карты*\n\n"
+            f"📅 *Дата и время:* {game_data['datetime_str']}\n"
+            f"👤 *Игрок:* {game_data['username']}\n"
+            f"🆔 *ID игрока:* {game_data['user_id']}\n"
+            f"💰 *Ставка:* {game_data['bet']}\n"
+            f"🎯 *Результат:* {result_text}\n"
+        )
+        
+        bot.send_message(ADMIN_ID, notification, parse_mode="Markdown")
+        
+    except Exception as e:
+        print(f"Ошибка отправки уведомления: {e}")
+
+
+# ======================= ФУНКЦИЯ: ЕЖЕДНЕВНАЯ СТАТИСТИКА =======================
+def send_daily_stats():
+    """Отправляет ежедневную статистику администратору"""
+    try:
+        now = datetime.now()
+        cutoff_time = now - timedelta(hours=24)
+        
+        # Считаем уникальных пользователей за последние 24 часа
+        recent_users = 0
+        for user_id, visits in user_visits.items():
+            if any(visit >= cutoff_time for visit in visits):
+                recent_users += 1
+        
+        # Считаем игры за последние 24 часа
+        recent_games = 0
+        for game in game_history:
+            if game["timestamp"] >= cutoff_time:
+                recent_games += 1
+        
+        stats_message = (
+            f"📊 *Ежедневная статистика*\n\n"
+            f"⏰ *Время отправки:* {now.strftime('%Y-%m-%d %H:%M:%S')}\n"
+            f"👥 *Уникальных пользователей за 24ч:* {recent_users}\n"
+            f"🎮 *Сыграно игр за 24ч:* {recent_games}\n"
+            f"📈 *Всего пользователей в истории:* {len(user_visits)}\n"
+            f"📋 *Всего игр в истории:* {len(game_history)}\n"
+            f"🕒 *Период:* {cutoff_time.strftime('%H:%M')} - {now.strftime('%H:%M')}"
+        )
+        
+        bot.send_message(ADMIN_ID, stats_message, parse_mode="Markdown")
+        
+    except Exception as e:
+        print(f"Ошибка отправки статистики: {e}")
+
+
+def schedule_daily_stats():
+    """Планирует отправку ежедневной статистики"""
+    # Устанавливаем время отправки (20:00 каждый день)
+    schedule.every().day.at("20:00").do(send_daily_stats)
+    
+    while True:
+        schedule.run_pending()
+        time.sleep(60)  # Проверяем каждую минуту
+
+
+def record_user_visit(user_id):
+    """Записывает посещение пользователя"""
+    user_visits[user_id].append(datetime.now())
+    
+    # Очищаем старые записи (старше 10 дней) чтобы не накапливать мусор
+    cutoff = datetime.now() - timedelta(days=10)
+    user_visits[user_id] = [visit for visit in user_visits[user_id] if visit >= cutoff]
+
+
 def end_round_with_humor(message, user_id, result):
     if user_id not in active_games:
         return
@@ -199,6 +323,17 @@ def end_round_with_humor(message, user_id, result):
     dealer_scores[user_id] = old_dealer_score + dealer_round_score
     new_player_score = user_scores[user_id]
     new_dealer_score = dealer_scores[user_id]
+    
+    # ======================= СОХРАНЕНИЕ РЕЗУЛЬТАТА ИГРЫ =======================
+    save_game_result(
+        user_id=user_id,
+        result=result,
+        bet=bet,
+        player_value=player_value,
+        dealer_value=dealer_value,
+        player_score=new_player_score,
+        dealer_score=new_dealer_score
+    )
 
     result_comments = {
         "player_wins": [
@@ -336,6 +471,7 @@ def update_game_display(message, user_id):
 @bot.message_handler(commands=["сыграем?"])
 def new_tournament(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     if user_id not in user_names:
         user_names[user_id] = message.from_user.first_name or "фраерок"
     name = user_names[user_id]
@@ -360,6 +496,7 @@ def new_tournament(message):
 
 def process_bet_with_humor(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     if user_id not in user_names:
         user_names[user_id] = message.from_user.first_name or "фраерок"
     original_bet = message.text.strip()
@@ -459,6 +596,7 @@ def process_bet_with_humor(message):
 @bot.message_handler(commands=["продолжим?"])
 def continue_tournament(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     name = user_names.get(user_id, "фраерок")
     if user_id not in user_bets:
         bot.send_message(
@@ -560,6 +698,7 @@ def start_new_round(message):
 )
 def game_callback(call):
     user_id = call.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     if call.data == "quit_game":
         items_deleted = reset_game_data(user_id)
         name = user_names.get(user_id, "фраерок")
@@ -714,7 +853,7 @@ templates = {
     "Того, кто в шторм не свернёт и пайку последнюю разделит",
     " Чью спину ветер не гнёт, а уважение гнёт",
     "Чьи глаза на стрелке больше слов говорят.",
-    'Братана, чья фраза "по понятиям" — уже закон',
+    'Братаан, чья фраза "по понятиям" — уже закон',
     "Того, кто в чужом кармане не шарит, но свой не пустит",
     "Чьё имя шепчут, когда нужна правда, а не треп.",
 ]
@@ -725,7 +864,7 @@ templates = {
     "Мне «тыкали» последний раз в карцере. Тот фраер до сих пор щи хлебает через трубочку",
     " У нас, сынок, «ты» — это как перчатка в лицо. Поднимать не спешат — боятся не успеть",
     "«Ты» — это для мусора и шестёрок. Определись, кто ты, пока я не определил за тебя",
-    "Каждое «ты» — как гвоздь в крышку. У меня терпения на три гвоздя. Ты уже второй забиваешь",
+    "Каждое «ты» — как гвоздь в крышку. У меня терпения на три гвоздя. Ты уже второй забиваещь",
     "На «ты» здесь говорят только при последнем слове. Ты уверен, что хочешь услышать?",
     "Меня на «ты» звали только отец да срок. Отец в могиле, срок — отбыт. Выводы сделай сам",
     "«Ты» — это ключ от люка в подвал. Не крути его без надобности",
@@ -829,6 +968,7 @@ def reset_user(user_id):
 @bot.message_handler(commands=["ссучиться"])
 def report_to_dev(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     name = user_names.get(user_id, "фраерок")
     bot.send_message(
         message.chat.id,
@@ -842,6 +982,7 @@ def report_to_dev(message):
 
 def process_dev_message(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     name = user_names.get(user_id, "фраерок")
     user_message = message.text
     try:
@@ -884,6 +1025,7 @@ def reset_game_data(user_id):
 @bot.message_handler(commands=["start"])
 def send_welcome(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     if user_id not in user_names:
         if message.from_user.username:
             user_names[user_id] = f"@{message.from_user.username}"
@@ -924,6 +1066,7 @@ def send_welcome(message):
 @bot.message_handler(commands=["погремуха"])
 def ask_name(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     current_name = user_names.get(user_id, "братишка")
     msg_text = (
         f"Пока ты не представишься я буду звать тебя {current_name}.\n"
@@ -936,6 +1079,7 @@ def ask_name(message):
 
 def process_name(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     name = message.text.strip()
     if name.lower() in ["нет", "no", "оставить", "так и быть", "пусть будет так"]:
         bot.send_message(
@@ -971,6 +1115,7 @@ def process_name(message):
 @bot.message_handler(commands=["поинтересоваться"])
 def ask_question(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     if user_id not in user_names:
         if message.from_user.username:
             user_names[user_id] = f"@{message.from_user.username}"
@@ -995,6 +1140,7 @@ def get_random_template(template_type):
 
 def process_question(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     question = message.text.strip()
     words = question.split()
     if (
@@ -1064,6 +1210,7 @@ def process_question(message):
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     user_id = call.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     if user_id not in user_names:
         user_info = bot.get_chat(user_id)
         if user_info.username:
@@ -1092,6 +1239,7 @@ def callback_query(call):
 @bot.message_handler(commands=["не_оставь_в_беде"])
 def send_help(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     name = user_names.get(user_id, "родной")
     help_text = (
         f"{name}, я — блатной оракул, помогу разобраться в жизненной ситуации, или обыграю тебя в очко\n\n"
@@ -1117,6 +1265,7 @@ def send_help(message):
 @bot.message_handler(commands=["расход"])
 def stop_talking(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     if user_id in user_names:
         name = user_names[user_id]
         game_items = reset_game_data(user_id)
@@ -1141,6 +1290,7 @@ def stop_talking(message):
 @bot.message_handler(func=lambda message: True)
 def handle_all_messages(message):
     user_id = message.from_user.id
+    record_user_visit(user_id)  # Записываем посещение
     if message.text.startswith("/"):
         return
     if user_id not in user_names:
@@ -1170,6 +1320,12 @@ def run_bot():
     bot.infinity_polling(timeout=60, long_polling_timeout=60)
 
 
+def run_scheduler():
+    """Запускает планировщик для ежедневной статистики"""
+    print("📅 Планировщик ежедневной статистики запущен...")
+    schedule_daily_stats()
+
+
 if __name__ == "__main__":
     print("🚀 Блатной оракул запущен на Render.com")
     
@@ -1177,6 +1333,9 @@ if __name__ == "__main__":
     flask_thread = threading.Thread(target=run_flask, daemon=True)
     flask_thread.start()
     
+    # Запускаем планировщик для ежедневной статистики
+    scheduler_thread = threading.Thread(target=run_scheduler, daemon=True)
+    scheduler_thread.start()
+    
     # Запускаем бота в основном потоке
     run_bot()
-
