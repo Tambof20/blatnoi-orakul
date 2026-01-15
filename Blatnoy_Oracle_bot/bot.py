@@ -491,6 +491,10 @@ def process_bet_with_humor(message):
     bet_text = original_bet.lower().strip()
     cleaned_bet = clean_bet_text(bet_text)
     display_bet = cleaned_bet
+    
+    # ======================= СПИСОК ЗАПРЕЩЕННЫХ ИМЕН =======================
+    forbidden_names = ["алекса", "алекс", "юры", "юрину", "юрино", "александров", 
+                      "александрова", "юркину", "юрки", "юркин"]
 
     if any(
         phrase in bet_text
@@ -1339,5 +1343,6 @@ if __name__ == "__main__":
     
     # Запускаем бота в основном потоке
     run_bot()
+
 
 
