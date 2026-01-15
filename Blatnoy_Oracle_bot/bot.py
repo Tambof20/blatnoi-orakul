@@ -354,7 +354,7 @@ def end_round_with_humor(message, user_id, result):
         f"Мои карты: {get_hand_display(game['dealer_hand'])} = {dealer_value}\n\n"
         f"{score_message}\n\n"
         f"Общая картина такая:\n"
-        f"На кону у нас <b>{bet}</b>\n"
+        f"Играем на <b>{bet}</b>\n"
         f"Твой счет:  {new_player_score}\n"
         f"Мой счет:  {new_dealer_score}\n"
     )
@@ -1329,3 +1329,4 @@ if __name__ == "__main__":
     
     # Запускаем бота в основном потоке
     run_bot()
+
