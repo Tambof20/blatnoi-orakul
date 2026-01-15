@@ -136,11 +136,52 @@ def get_hand_display(hand, hide_first=False):
 
 
 def clean_bet_text(bet_text):
-    if bet_text.lower().startswith("на "):
-        bet_text = bet_text[3:].strip()
-    if bet_text.lower().endswith(" на"):
-        bet_text = bet_text[:-3].strip()
+    # Приводим к нижнему регистру для удобства обработки
+    bet_text_lower = bet_text.lower()
+    
+    # Список слов для удаления с начала и конца
+    remove_words = ["на", "сыграем", "играем", "ставлю", "поставлю", "играю", "ставим", "поставим"]
+    
+    # Удаляем слова с начала
+    for word in remove_words:
+        if bet_text_lower.startswith(f"{word} "):
+            bet_text = bet_text[len(word):].strip()
+            bet_text_lower = bet_text.lower()
+    
+    # Удаляем слова с конца
+    for word in remove_words:
+        if bet_text_lower.endswith(f" {word}"):
+            bet_text = bet_text[:-len(word)].strip()
+            bet_text_lower = bet_text.lower()
+    
+    # Также убираем комбинации слов
+    remove_phrases = [
+        "на ",
+        " сыграем",
+        " играем",
+        " ставлю",
+        " поставлю",
+        " играю",
+        " ставим",
+        " поставим",
+    ]
+    
+    # Удаляем фразы с начала
+    for phrase in remove_phrases:
+        while bet_text_lower.startswith(phrase):
+            bet_text = bet_text[len(phrase):].strip()
+            bet_text_lower = bet_text.lower()
+    
+    # Удаляем фразы с конца
+    for phrase in remove_phrases:
+        phrase_without_space = phrase.strip()
+        while bet_text_lower.endswith(phrase_without_space):
+            bet_text = bet_text[:-len(phrase_without_space)].strip()
+            bet_text_lower = bet_text.lower()
+    
+    # Убираем лишние пробелы
     bet_text = " ".join(bet_text.split())
+    
     if not bet_text:
         return "ничего"
     return bet_text
@@ -1343,6 +1384,7 @@ if __name__ == "__main__":
     
     # Запускаем бота в основном потоке
     run_bot()
+
 
 
 
