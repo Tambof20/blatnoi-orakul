@@ -504,6 +504,16 @@ def process_bet_with_humor(message):
         msg = bot.send_message(message.chat.id, "Так на что играем?")
         bot.register_next_step_handler(msg, process_bet_with_humor)
         return
+    elif any(name in bet_text for name in forbidden_names):
+        bot.send_message(
+            message.chat.id,
+            f"Нет, мы бедем играть на твое рыжее очко'\n"
+            f"И за базар придется отвечать...",
+            parse_mode="HTML",
+        )
+        user_bets[user_id] = "твое рыжее очко"
+        start_new_round(message)
+        return
     elif "интерес" in bet_text:
         bot.send_message(
             message.chat.id,
@@ -1329,4 +1339,5 @@ if __name__ == "__main__":
     
     # Запускаем бота в основном потоке
     run_bot()
+
 
