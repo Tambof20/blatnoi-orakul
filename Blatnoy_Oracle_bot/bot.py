@@ -579,22 +579,17 @@ def update_game_display(message, user_id):
 
 def ask_for_multiplayer_invitation(message, user_id, bet):
     """Спрашивает, хочет ли пользователь пригласить другого игрока"""
-    user_states[user_id] = {"state": "waiting_for_invite_decision", "bet": bet}
-
     markup = types.InlineKeyboardMarkup(row_width=2)
-    btn_yes = types.InlineKeyboardButton(
-        "Да, пригласить игрока", callback_data="invite_yes"
-    )
-    btn_no = types.InlineKeyboardButton(
-        "Нет, играть с ботом", callback_data="invite_no"
-    )
-    markup.add(btn_yes, btn_no)
+    btn_invite = types.InlineKeyboardButton("Пригласить друга", callback_data="invite_friend")
+    btn_bot = types.InlineKeyboardButton("Играем с ботом", callback_data="play_with_bot")
+    markup.add(btn_invite, btn_bot)
 
     bot.send_message(
         message.chat.id,
-        f"Играем на <b>{bet}</b>\n\n"
-        f"Хочешь пригласить еще одного игрока?\n"
-        f"Или будем играть как обычно - ты против меня?",
+        f"🎮 <b>Выберите вариант игры:</b>\n\n"
+        f"💰 Ставка: <b>{bet}</b>\n\n"
+        f"1️⃣ <b>Пригласить друга</b> - выберите друга из списка контактов\n"
+        f"2️⃣ <b>Играем с ботом</b> - продолжить игру с ботом",
         reply_markup=markup,
         parse_mode="HTML",
     )
@@ -616,6 +611,64 @@ def create_multiplayer_invitation(inviter_id, bet):
     }
 
     return invitation_id
+
+
+def show_contact_list(message, user_id, bet, invitation_id):
+    """Показывает список контактов для выбора друга"""
+    # Создаем клавиатуру с кнопкой "Отмена"
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    btn_cancel = types.KeyboardButton("Отмена")
+    markup.add(btn_cancel)
+    
+    # Сохраняем состояние пользователя
+    user_states[user_id] = {
+        "state": "waiting_for_contact_selection",
+        "bet": bet,
+        "invitation_id": invitation_id,
+    }
+    
+    # Отправляем сообщение с инструкцией
+    bot.send_message(
+        user_id,
+        f"📱 <b>Выберите друга из списка контактов:</b>\n\n"
+        f"1. Нажмите на кнопку '📎' (скрепка) в поле ввода сообщения\n"
+        f"2. Выберите 'Контакты' или 'Отправить контакт'\n"
+        f"3. Выберите друга, которого хотите пригласить\n\n"
+        f"💰 Ставка: <b>{bet}</b>\n\n"
+        f"Или нажмите 'Отмена' для возврата в меню",
+        reply_markup=markup,
+        parse_mode="HTML"
+    )
+
+
+def send_invitation_messages(invitation_id, contact_user_id, contact_name):
+    """Отправляет пригласительные сообщения выбранному контакту"""
+    invitation = pending_invitations.get(invitation_id)
+    if not invitation:
+        return False
+
+    inviter_name = invitation["inviter_name"]
+    bet = invitation["bet"]
+    
+    # Бот не может отправлять сообщения пользователям, которые не начали с ним диалог
+    # Поэтому мы сохраняем информацию о приглашении и ждем, когда пользователь сам примет его
+    
+    # Сохраняем ID приглашенного пользователя
+    invitation["invitee_id"] = contact_user_id
+    invitation["invitee_name"] = contact_name
+    
+    # Уведомляем приглашающего
+    bot.send_message(
+        invitation["inviter_id"],
+        f"✅ <b>Приглашение отправлено!</b>\n\n"
+        f"👤 Приглашен: {contact_name}\n"
+        f"💰 Ставка: <b>{bet}</b>\n\n"
+        f"⏳ Ожидаем подтверждения от друга...\n"
+        f"Пока можете начать обычную игру командой /продолжим?",
+        parse_mode="HTML"
+    )
+    
+    return True
 
 
 def create_multiplayer_game(inviter_id, invitee_id, bet):
@@ -752,7 +805,7 @@ def start_new_multiplayer_round(game_id):
     game["player2_score"] = calculate_hand_value(game["player2_hand"])
     game["player1_stand"] = False
     game["player2_stand"] = False
-    game["current_turn"] = game["player1_id"]  # Первым ходит пригласивший
+    game["current_turn"] = game["player1_id"]  # Первым ходит пригласиввший
     game["round_number"] += 1
 
     return True
@@ -1007,7 +1060,7 @@ def process_bet_with_humor(message):
             parse_mode="HTML",
         )
         user_bets[user_id] = "твое рыжее, драное очко"
-        ask_for_multiplayer_invitation(message, user_id, "твое рыжее, драное очко")
+        start_new_round(message)
         return
     elif "интерес" in bet_text:
         bot.send_message(
@@ -1090,12 +1143,12 @@ def process_bet_with_humor(message):
 # ======================= НОВЫЕ ОБРАБОТЧИКИ ДЛЯ МУЛЬТИПЛЕЕРА =======================
 
 
-@bot.callback_query_handler(func=lambda call: call.data in ["invite_yes", "invite_no"])
-def handle_invite_decision(call):
+@bot.callback_query_handler(func=lambda call: call.data in ["invite_friend", "play_with_bot"])
+def handle_game_choice(call):
     user_id = call.from_user.id
     record_user_visit(user_id)
 
-    if call.data == "invite_no":
+    if call.data == "play_with_bot":
         # Пользователь хочет играть с ботом
         bot.answer_callback_query(call.id, "Играем с ботом!")
         bot.edit_message_text(
@@ -1104,87 +1157,97 @@ def handle_invite_decision(call):
         # Запускаем обычную игру
         start_new_round(call.message)
 
-    elif call.data == "invite_yes":
-        # Пользователь хочет пригласить другого игрока
-        user_state = user_states.get(user_id)
-        if not user_state:
-            bot.answer_callback_query(call.id, "Ошибка: данные не найдены")
+    elif call.data == "invite_friend":
+        # Пользователь хочет пригласить друга
+        # Получаем ставку пользователя
+        bet = user_bets.get(user_id)
+        if not bet:
+            bot.answer_callback_query(call.id, "Ошибка: ставка не найдена")
             return
-
-        bet = user_state["bet"]
+        
+        # Создаем приглашение
         invitation_id = create_multiplayer_invitation(user_id, bet)
-        inviter_name = user_names.get(user_id, "фраерок")
-
-        bot.answer_callback_query(call.id, "Создаю приглашение...")
         
-        # Создаем сообщение о приглашении с кнопками
-        markup = types.InlineKeyboardMarkup(row_width=2)
-        btn_invite = types.InlineKeyboardButton("Пригласить друга", callback_data=f"send_invite_{invitation_id}")
-        btn_cancel = types.InlineKeyboardButton("Отменить (играть с ботом)", callback_data="invite_no")
-        markup.add(btn_invite, btn_cancel)
-        
-        # Отправляем сообщение с кнопками
+        bot.answer_callback_query(call.id, "Выберите друга из контактов")
         bot.edit_message_text(
-            f"Отлично! Вы хотите пригласить друга на игру в 21.\n\n"
-            f"Ставка: <b>{bet}</b>\n\n"
-            f"Нажмите 'Пригласить друга' для создания приглашения:",
+            f"🎮 <b>Приглашение создано!</b>\n\n"
+            f"💰 Ставка: <b>{bet}</b>\n\n"
+            f"Теперь выберите друга из списка контактов:",
             call.message.chat.id,
             call.message.message_id,
-            reply_markup=markup,
             parse_mode="HTML"
         )
+        
+        # Показываем список контактов
+        show_contact_list(call.message, user_id, bet, invitation_id)
 
 
-# Добавляем новый обработчик для отправки приглашения
-@bot.callback_query_handler(func=lambda call: call.data.startswith("send_invite_"))
-def handle_send_invitation(call):
-    user_id = call.from_user.id
-    record_user_visit(user_id)
-    
-    # Извлекаем invitation_id из callback_data
-    invitation_id = call.data.replace("send_invite_", "")
-    invitation = pending_invitations.get(invitation_id)
-    
-    if not invitation:
-        bot.answer_callback_query(call.id, "Приглашение не найдено")
+@bot.message_handler(
+    func=lambda message: user_states.get(message.from_user.id, {}).get("state")
+    == "waiting_for_contact_selection"
+)
+def handle_contact_selection(message):
+    user_id = message.from_user.id
+    user_state = user_states.get(user_id)
+
+    if not user_state:
         return
+
+    # Проверяем, не нажата ли кнопка "Отмена"
+    if message.text == "Отмена":
+        bot.send_message(
+            user_id,
+            "❌ Приглашение отменено.\n\n"
+            "Хотите начать игру с ботом? Используйте команду /продолжим?",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+        if user_id in user_states:
+            del user_states[user_id]
+        return
+
+    # Проверяем, отправлен ли контакт
+    if message.contact:
+        contact = message.contact
+        contact_user_id = contact.user_id
+        contact_name = f"{contact.first_name or ''} {contact.last_name or ''}".strip() or "Друг"
+        
+        invitation_id = user_state["invitation_id"]
+        bet = user_state["bet"]
+        
+        # Отправляем приглашение
+        success = send_invitation_messages(invitation_id, contact_user_id, contact_name)
+        
+        if success:
+            bot.send_message(
+                user_id,
+                f"✅ <b>Приглашение отправлено {contact_name}!</b>\n\n"
+                f"⏳ Ожидаем подтверждения...\n\n"
+                f"Пока можете начать обычную игру командой /продолжим?",
+                parse_mode="HTML",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
+        else:
+            bot.send_message(
+                user_id,
+                "❌ Ошибка при отправке приглашения. Попробуйте еще раз или начните обычную игру.",
+                reply_markup=types.ReplyKeyboardRemove()
+            )
+        
+        # Очищаем состояние
+        if user_id in user_states:
+            del user_states[user_id]
     
-    inviter_id = invitation["inviter_id"]
-    bet = invitation["bet"]
-    inviter_name = user_names.get(inviter_id, "фраерок")
-    
-    # Отправляем первое сообщение о приглашении
-    invitation_text = (
-        f"🎮 <b>Приглашение в игру 21</b>\n\n"
-        f"👤 <b>{inviter_name}</b> приглашает вас сыграть с ним в карты в игру 21\n"
-        f"🏆 Турнир до 101 очка\n"
-        f"💰 Ставка: <b>{bet}</b>"
-    )
-    
-    # Отправляем второе сообщение с командой для копирования
-    command_text = (
-        f"📋 <b>Для принятия приглашения:</b>\n\n"
-        f"Скопируйте эту команду и отправьте боту:\n"
-        f"<code>/принять {invitation_id}</code>\n\n"
-        f"Или просто нажмите на команду выше, чтобы скопировать."
-    )
-    
-    # Отправляем оба сообщения
-    bot.send_message(inviter_id, invitation_text, parse_mode="HTML")
-    bot.send_message(inviter_id, command_text, parse_mode="HTML")
-    
-    # Обновляем предыдущее сообщение
-    bot.edit_message_text(
-        f"✅ Приглашение создано!\n\n"
-        f"Два сообщения с информацией о приглашении были отправлены вам выше.\n\n"
-        f"Перешлите их другу, чтобы он мог принять ваше приглашение.\n\n"
-        f"Пока ждете ответа, можете начать обычную игру командой /продолжим?",
-        call.message.chat.id,
-        call.message.message_id,
-        parse_mode="HTML"
-    )
-    
-    bot.answer_callback_query(call.id, "Приглашение создано!")
+    else:
+        # Если отправлено не контакт, а текст
+        bot.send_message(
+            user_id,
+            "⚠️ Пожалуйста, выберите друга из списка контактов:\n"
+            "1. Нажмите на кнопку '📎' (скрепка)\n"
+            "2. Выберите 'Контакты'\n"
+            "3. Выберите друга\n\n"
+            "Или нажмите 'Отмена'",
+            reply_markup=types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True).add("Отмена")
+        )
 
 
 @bot.message_handler(commands=["принять"])
@@ -1208,6 +1271,11 @@ def accept_invitation(message):
 
         if invitation["status"] != "pending":
             bot.send_message(message.chat.id, "Это приглашение уже было использовано.")
+            return
+
+        # Проверяем, совпадает ли ID приглашенного пользователя
+        if invitation["invitee_id"] and invitation["invitee_id"] != user_id:
+            bot.send_message(message.chat.id, "Это приглашение предназначено не вам.")
             return
 
         # Обновляем приглашение
