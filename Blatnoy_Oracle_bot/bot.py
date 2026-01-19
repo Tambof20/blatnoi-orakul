@@ -1203,13 +1203,6 @@ def send_friend_invitation(message, user_id, bet, invitation_id):
 
 # ======================= НОВЫЕ ОБРАБОТЧИКИ ДЛЯ МУЛЬТИПЛЕЕРА =======================
 
-
-@bot.message_handler(
-    func=lambda message: user_states.get(message.from_user.id, {}).get("state")
-    == "waiting_for_invitee"
-)
-
-
 @bot.message_handler(commands=["принять"])
 def accept_invitation(message):
     user_id = message.from_user.id
@@ -2183,3 +2176,4 @@ if __name__ == "__main__":
 
     # Запускаем бота в основном потоке
     run_bot()
+
