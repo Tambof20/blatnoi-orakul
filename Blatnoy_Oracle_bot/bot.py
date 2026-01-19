@@ -618,52 +618,6 @@ def create_multiplayer_invitation(inviter_id, bet):
     return invitation_id
 
 
-def ask_for_invitee(message, user_id, bet, invitation_id):
-    """Просит указать username пользователя для приглашения"""
-    user_states[user_id] = {
-        "state": "waiting_for_invitee",
-        "bet": bet,
-        "invitation_id": invitation_id,
-    }
-
-    bot.send_message(
-        message.chat.id,
-        f"Отлично! Пригласи друга на игру в 21.\n\n"
-        f"Ставка: <b>{bet}</b>\n\n"
-        f"Укажи @username друга, которому хочешь отправить приглашение:",
-        parse_mode="HTML",
-    )
-
-
-def send_invitation_to_user(invitation_id, invitee_username):
-    """Отправляет приглашение указанному пользователю"""
-    invitation = pending_invitations.get(invitation_id)
-    if not invitation:
-        return False
-
-    # Ищем пользователя по username
-    # В реальном боте нужно было бы хранить маппинг username->user_id
-    # Для упрощения будем просить ввести user_id напрямую
-
-    inviter_name = invitation["inviter_name"]
-    bet = invitation["bet"]
-
-    # Отправляем сообщение приглашающему
-    bot.send_message(
-        invitation["inviter_id"],
-        f"Приглашение создано!\n\n"
-        f"Ставка: <b>{bet}</b>\n"
-        f"Игрок: @{invitee_username}\n\n"
-        f"Скопируй и отправь другу эту команду:\n"
-        f"<code>/принять {invitation_id}</code>\n\n"
-        f"Или можешь отправить ему эту ссылку:\n"
-        f"https://t.me/share/url?url=/принять%20{invitation_id}",
-        parse_mode="HTML",
-    )
-
-    return True
-
-
 def create_multiplayer_game(inviter_id, invitee_id, bet):
     """Создает мультиплеерную игру"""
     global game_counter
@@ -1053,7 +1007,7 @@ def process_bet_with_humor(message):
             parse_mode="HTML",
         )
         user_bets[user_id] = "твое рыжее, драное очко"
-        start_new_round(message)
+        ask_for_multiplayer_invitation(message, user_id, "твое рыжее, драное очко")
         return
     elif "интерес" in bet_text:
         bot.send_message(
@@ -1121,7 +1075,6 @@ def process_bet_with_humor(message):
             parse_mode="HTML",
         )
         user_bets[user_id] = display_bet
-        # Вместо start_new_round спрашиваем про мультиплеер
         ask_for_multiplayer_invitation(message, user_id, display_bet)
         return
     else:
@@ -1131,7 +1084,6 @@ def process_bet_with_humor(message):
             parse_mode="HTML",
         )
         user_bets[user_id] = display_bet
-        # Вместо start_new_round спрашиваем про мультиплеер
         ask_for_multiplayer_invitation(message, user_id, display_bet)
 
 
@@ -1161,58 +1113,78 @@ def handle_invite_decision(call):
 
         bet = user_state["bet"]
         invitation_id = create_multiplayer_invitation(user_id, bet)
+        inviter_name = user_names.get(user_id, "фраерок")
 
-        bot.answer_callback_query(call.id, "Создаем приглашение...")
+        bot.answer_callback_query(call.id, "Создаю приглашение...")
+        
+        # Создаем сообщение о приглашении с кнопками
+        markup = types.InlineKeyboardMarkup(row_width=2)
+        btn_invite = types.InlineKeyboardButton("Пригласить друга", callback_data=f"send_invite_{invitation_id}")
+        btn_cancel = types.InlineKeyboardButton("Отменить (играть с ботом)", callback_data="invite_no")
+        markup.add(btn_invite, btn_cancel)
+        
+        # Отправляем сообщение с кнопками
         bot.edit_message_text(
-            f"Отлично! Создаю приглашение для игры на <b>{bet}</b>",
+            f"Отлично! Вы хотите пригласить друга на игру в 21.\n\n"
+            f"Ставка: <b>{bet}</b>\n\n"
+            f"Нажмите 'Пригласить друга' для создания приглашения:",
             call.message.chat.id,
             call.message.message_id,
-            parse_mode="HTML",
+            reply_markup=markup,
+            parse_mode="HTML"
         )
 
-        # Просим указать username друга
-        ask_for_invitee(call.message, user_id, bet, invitation_id)
 
-
-@bot.message_handler(
-    func=lambda message: user_states.get(message.from_user.id, {}).get("state")
-    == "waiting_for_invitee"
-)
-def handle_invitee_username(message):
-    user_id = message.from_user.id
-    user_state = user_states.get(user_id)
-
-    if not user_state:
+# Добавляем новый обработчик для отправки приглашения
+@bot.callback_query_handler(func=lambda call: call.data.startswith("send_invite_"))
+def handle_send_invitation(call):
+    user_id = call.from_user.id
+    record_user_visit(user_id)
+    
+    # Извлекаем invitation_id из callback_data
+    invitation_id = call.data.replace("send_invite_", "")
+    invitation = pending_invitations.get(invitation_id)
+    
+    if not invitation:
+        bot.answer_callback_query(call.id, "Приглашение не найдено")
         return
-
-    invitee_username = message.text.strip()
-    if invitee_username.startswith("@"):
-        invitee_username = invitee_username[1:]
-
-    invitation_id = user_state["invitation_id"]
-    bet = user_state["bet"]
-
-    # Отправляем приглашение
-    success = send_invitation_to_user(invitation_id, invitee_username)
-
-    if success:
-        bot.send_message(
-            message.chat.id,
-            f"Приглашение отправлено пользователю @{invitee_username}!\n\n"
-            f"Ждем ответа...\n\n"
-            f"Пока ждешь, можешь начать обычную игру с ботом командой /продолжим?",
-            parse_mode="HTML",
-        )
-    else:
-        bot.send_message(
-            message.chat.id,
-            "Ошибка при создании приглашения. Попробуй еще раз или начни обычную игру.",
-            parse_mode="HTML",
-        )
-
-    # Очищаем состояние
-    if user_id in user_states:
-        del user_states[user_id]
+    
+    inviter_id = invitation["inviter_id"]
+    bet = invitation["bet"]
+    inviter_name = user_names.get(inviter_id, "фраерок")
+    
+    # Отправляем первое сообщение о приглашении
+    invitation_text = (
+        f"🎮 <b>Приглашение в игру 21</b>\n\n"
+        f"👤 <b>{inviter_name}</b> приглашает вас сыграть с ним в карты в игру 21\n"
+        f"🏆 Турнир до 101 очка\n"
+        f"💰 Ставка: <b>{bet}</b>"
+    )
+    
+    # Отправляем второе сообщение с командой для копирования
+    command_text = (
+        f"📋 <b>Для принятия приглашения:</b>\n\n"
+        f"Скопируйте эту команду и отправьте боту:\n"
+        f"<code>/принять {invitation_id}</code>\n\n"
+        f"Или просто нажмите на команду выше, чтобы скопировать."
+    )
+    
+    # Отправляем оба сообщения
+    bot.send_message(inviter_id, invitation_text, parse_mode="HTML")
+    bot.send_message(inviter_id, command_text, parse_mode="HTML")
+    
+    # Обновляем предыдущее сообщение
+    bot.edit_message_text(
+        f"✅ Приглашение создано!\n\n"
+        f"Два сообщения с информацией о приглашении были отправлены вам выше.\n\n"
+        f"Перешлите их другу, чтобы он мог принять ваше приглашение.\n\n"
+        f"Пока ждете ответа, можете начать обычную игру командой /продолжим?",
+        call.message.chat.id,
+        call.message.message_id,
+        parse_mode="HTML"
+    )
+    
+    bot.answer_callback_query(call.id, "Приглашение создано!")
 
 
 @bot.message_handler(commands=["принять"])
