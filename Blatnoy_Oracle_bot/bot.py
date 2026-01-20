@@ -796,11 +796,11 @@ def update_multiplayer_game_display(game_id, player_id):
     game_text = (
         f" <b>Игра против {opponent_name}</b>\n"
         f" на <b>{game['bet']}</b>\n\n"
-        f"Прмежуьочный итог\n"
+        f"Прмежуточный итог\n"
         f"У {player_name}: {player_total_score} очков, у {opponent_name}: {opponent_total_score}\n\n"
         f" <b>Твои карты:</b> {get_hand_display(player_hand)}\n"
         f"Очков в раунде: {player_score}\n\n"
-        f" <b>Карты {opponent_name}:</b> ❓ ❓\n"
+        f" <b>Карты {opponent_name}:</b> ❓ \n"
         f" Очков в раунде: ???\n\n"
     )
 
@@ -1088,16 +1088,15 @@ def process_bet_with_humor(message):
 def ask_for_game_mode(message, user_id, bet):
     """Спрашивает, как играть: с ботом или с другом"""
     markup = types.InlineKeyboardMarkup(row_width=2)
-    btn_friend = types.InlineKeyboardButton("👥 Пригласить друга", callback_data=f"play_friend_{bet}")
-    btn_bot = types.InlineKeyboardButton("🤖 Играть с ботом", callback_data=f"play_bot_{bet}")
+    btn_friend = types.InlineKeyboardButton("позвать кента", callback_data=f"play_friend_{bet}")
+    btn_bot = types.InlineKeyboardButton("играть с арестанотом", callback_data=f"play_bot_{bet}")
     markup.add(btn_friend, btn_bot)
     
     bot.send_message(
         message.chat.id,
-        f"💰 Ставка принята: <b>{bet}</b>\n\n"
-        f"Выбери режим игры:\n"
-        f"• <b>Играть с ботом</b> - продолжим обычную игру\n"
-        f"• <b>Пригласить друга</b> - пригласи друга на турнир до 101 очка",
+        f"Со мной будешь фарт мерить, или нешел какого-то лоха?\n"
+        f"• <b>играть с арестантом </b> - продолжим обычную игру\n"
+        f"• <b>позвать кента</b> - пригласи друга на турнир до 101 очка",
         reply_markup=markup,
         parse_mode="HTML"
     )
@@ -2157,6 +2156,7 @@ if __name__ == "__main__":
 
     # Запускаем бота в основном потоке
     run_bot()
+
 
 
 
