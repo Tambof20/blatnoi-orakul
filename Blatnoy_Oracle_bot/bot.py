@@ -794,16 +794,14 @@ def update_multiplayer_game_display(game_id, player_id):
         opponent_total_score = scores.get(opponent_id, 0)
 
     game_text = (
-        f"🎮 <b>Игра в 21 против {opponent_name}</b>\n\n"
-        f"💰 Ставка: <b>{game['bet']}</b>\n"
-        f"📊 Раунд: {game['round_number']}\n\n"
-        f"📈 Турнирные очки:\n"
-        f"👤 {player_name}: {player_total_score}\n"
-        f"👤 {opponent_name}: {opponent_total_score}\n\n"
-        f"👤 <b>Твои карты:</b> {get_hand_display(player_hand)}\n"
-        f"📊 Очков в раунде: {player_score}\n\n"
-        f"👤 <b>Карты {opponent_name}:</b> ❓ ❓\n"
-        f"📊 Очков в раунде: ???\n\n"
+        f" <b>Игра против {opponent_name}</b>\n"
+        f" на <b>{game['bet']}</b>\n\n"
+        f"Прмежуьочный итог\n"
+        f"У {player_name}: {player_total_score} очков, у {opponent_name}: {opponent_total_score}\n\n"
+        f" <b>Твои карты:</b> {get_hand_display(player_hand)}\n"
+        f"Очков в раунде: {player_score}\n\n"
+        f" <b>Карты {opponent_name}:</b> ❓ ❓\n"
+        f" Очков в раунде: ???\n\n"
     )
 
     # Проверяем, не завершился ли турнир
@@ -866,13 +864,12 @@ def end_multiplayer_round_and_continue(game_id):
             loser_name = game["player1_name"]
 
         result_text = (
-            f"🏆 <b>ТУРНИР ЗАВЕРШЕН!</b>\n\n"
-            f"💰 Ставка: <b>{game['bet']}</b>\n\n"
-            f"📊 Финальные очки:\n"
-            f"👤 {game['player1_name']}: {round_result['player1_total']}\n"
-            f"👤 {game['player2_name']}: {round_result['player2_total']}\n\n"
-            f"🎉 <b>ПОБЕДИТЕЛЬ: {winner_name}!</b>\n\n"
-            f"{winner_name} набрал(а) 101 очко и забирает ставку!"
+            f" <b>ТУРНИР ЗАВЕРШЕН!</b>\n\n"
+            f" Финальный итог:\n"
+            f" {game['player1_name']}: {round_result['player1_total']}\n"
+            f" {game['player2_name']}: {round_result['player2_total']}\n\n"
+            f" <b>ПОБЕДИТЕЛЬ: {winner_name}!</b>\n\n"
+            f"{winner_name} набрал(а) 101 очко и забирает <b>{game['bet']}</b>!"
         )
 
         # Отправляем результаты обоим игрокам
@@ -887,12 +884,13 @@ def end_multiplayer_round_and_continue(game_id):
         return
 
     # Турнир продолжается, показываем результаты раунда
+    time.sleep(2)
     round_text = (
-        f"📊 <b>Раунд {game['round_number']} завершен!</b>\n\n"
-        f"👤 {game['player1_name']}:\n"
+        f"<b>Раунд {game['round_number']} завершен!</b>\n\n"
+        f" {game['player1_name']}:\n"
         f"Карты: {get_hand_display(game['player1_hand'])}\n"
         f"Очков в раунде: {round_result['player1_hand_value']}\n\n"
-        f"👤 {game['player2_name']}:\n"
+        f"{game['player2_name']}:\n"
         f"Карты: {get_hand_display(game['player2_hand'])}\n"
         f"Очков в раунде: {round_result['player2_hand_value']}\n\n"
     )
@@ -905,10 +903,6 @@ def end_multiplayer_round_and_continue(game_id):
     else:
         round_text += f"🏆 <b>Победитель раунда: {game['player2_name']}</b>\n"
         round_text += f"Получает {round_result['player2_hand_value']} очков\n"
-
-    round_text += f"\n📈 Турнирные очки:\n"
-    round_text += f"👤 {game['player1_name']}: {round_result['player1_total']}\n"
-    round_text += f"👤 {game['player2_name']}: {round_result['player2_total']}\n\n"
     round_text += f"➡️ <b>Следующий раунд начинается...</b>"
 
     # Отправляем результаты раунда обоим игрокам
@@ -2163,5 +2157,6 @@ if __name__ == "__main__":
 
     # Запускаем бота в основном потоке
     run_bot()
+
 
 
